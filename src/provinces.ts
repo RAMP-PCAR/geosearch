@@ -1,37 +1,34 @@
 import * as defs from './definitions';
 import * as provs from '../data/provinces.json';
-import * as fsaToProv from '../data/fsa_to_prov.json';
 
-const provinceObj = {};
+class Province implements ProvinceI {
+    term: string;
+    en: string;
+    code: string;
+    FSA: string | Array<string>;
+    fr: string;
+    latlon: defs.latLon;
+    bbox: Array<number>;
 
-class Provinces {
-    list: defs.genericObjectType = {};
-
-    constructor(language: string) {
-        Object.keys(provs[language]).forEach(provKey => {
-            this.list[provKey] = provs[language][provKey];
-        });
+    containsFSA(fsa: string): boolean {
+        fsa = fsa.substring(0,1);
+        return typeof this.FSA === 'string' ? fsa === this.FSA : !!this.FSA.find(f => f === fsa);
     }
-
-    fsaToProvinces(fsa: string): defs.genericObjectType {
-        const genericObj = {};
-    
-        // either a provincial code, or an array of them
-        let provCodes = fsaToProv[fsa.substring(0,1).toUpperCase()];
-    
-        if (typeof provCodes === 'number') {
-            provCodes = [provCodes];
-        }
-    
-        provCodes.forEach(n => {
-            genericObj[n] = this.list[n];
-        });
-
-        return genericObj;
-    }
-    
 }
 
-export default function(language: string): defs.Provinces {
-    return provinceObj[language] = provinceObj[language] ? provinceObj[language] : new Provinces(language);
+export const list: Array<ProvinceI> = Object.keys(provs).map(provCode => {
+    const P = new Province();
+    Object.assign(P, provs[provCode]);
+    return P;
+});
+
+export interface ProvinceI {
+    "term": string,
+    "en": string,
+    "code": string,
+    "FSA": string | Array<string>,
+    "fr": string,
+    "latlon": defs.latLon,
+    "bbox": Array<number>,
+    containsFSA(fsa: string): boolean
 }

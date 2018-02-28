@@ -1,24 +1,31 @@
+import * as Provinces from './provinces';
+import * as Types from './types';
+
 export interface genericObjectType {
     [key: string]: string
+}
+
+export interface genericNumberObjectType {
+    [key: string]: number
 }
 
 // config object is used by all query classes
 export interface mainConfig {
     geoNameUrl: string,
     geoLocateUrl: string,
-    maxResults: number,
     language: string,
-    types: Types,
-    provinces: Provinces
+    types: Types.TypeI,
+    provinces: Provinces.ProvinceI,
+    sortByTypes: genericNumberObjectType
 }
 
 export interface userConfig {
     includeTypes?: string | Array<string>,
     excludeTypes?: string | Array<string>,
     language?: string,
-    maxResults?: number,
     geoLocateUrl?: string,
-    geoNameUrl?: string
+    geoNameUrl?: string,
+    sortByTypes?: Array<string>
 }
 
 export interface latLon {
@@ -42,17 +49,6 @@ export interface nameResponse {
     bbox: Array<number>,
 }
 
-export interface Types {
-    allTypes: genericObjectType
-    validTypes: genericObjectType;
-    filterValidTypes(include?: string | Array<string>, exclude?: string | Array<string>): genericObjectType;
-}
-
-export interface Provinces {
-    fsaToProvinces(fsa: string): genericObjectType;
-    list: genericObjectType;
-}
-
 // final results from a query, filtered on types and sorted where applicable
 export interface finalResults {
     featured: nameResultList | FSAResult | NTSResult,
@@ -67,19 +63,13 @@ export interface rawNameResult {
 export interface nameResult {
     name: string,
     location: string,
-    province: string, // "Ontario"
-    type: string, // "Lake"
+    province: {
+        name: string,
+        code: string
+    },
+    type: string,
     latLon: latLon,
     bbox: Array<number>
-}
-
-export interface FSAResult {
-    fsa: string, // "H0H"
-    code: string, // "FSA"
-    desc: string, // "Forward Sortation Area"
-    province: string, // Ontario
-    _provinces: genericObjectType, // {ON: "Ontario"} or {ON: "Ontario", MB: "Manitoba"}
-    latLon: latLon
 }
 
 export interface NTSResult {
@@ -91,7 +81,7 @@ export interface NTSResult {
     bbox: Array<number>
 }
 
-export type locateResponseList = Array<locateResponse>;
+
 export type nameResultList = Array<nameResult>
 export type NTSResultList = Array<NTSResult>;
 export type queryFeatureResults = FSAResult | NTSResult;

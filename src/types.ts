@@ -1,13 +1,13 @@
 import * as types from '../data/types.json';
-import * as defs from './definitions';
+import { genericObjectType } from './index';
 
-class Type implements TypeI {
+export class Type {
     // The key values are valid geoname concise types with an array value of all permutations
     conciseToList = {};
     filteredConciseToList = {};
     flat = types;
     filteredFlat = types;
-    validSet = new Set();
+    validSet: Array<string> = [];
 
     constructor() {
         Object.keys(types).forEach(p => {
@@ -30,7 +30,7 @@ class Type implements TypeI {
             return false;
     }
 
-    filterValidTypes(include?: string | Array<string>, exclude?: string | Array<string>): defs.genericObjectType {
+    filterValidTypes(include?: string | Array<string>, exclude?: string | Array<string>): genericObjectType {
         include = typeof include === 'string' ? [include] : include;
         exclude = typeof exclude === 'string' ? [exclude] : exclude;
         const setExclusion = include || exclude ? (include && include.length > 0) || (exclude && exclude.length) : null;
@@ -51,16 +51,8 @@ class Type implements TypeI {
     }
 }
 
-export function make() {
-    return new Type();
-}
-
-export interface TypeI {
-    conciseToList: {[key: string]: Array<string>};
-    filteredConciseToList: {[key: string]: Array<string>};
-    filteredFlat: defs.genericObjectType;
-    flat: defs.genericObjectType;
-    validSet: Set<string>;
-    filterValidTypes(include?: string | Array<string>, exclude?: string | Array<string>): defs.genericObjectType;
-    isValid(type: string): string | false;
+export function make(include?: string | Array<string>, exclude?: string | Array<string>) {
+    const newType = new Type();
+    newType.filterValidTypes(include, exclude);
+    return newType;
 }

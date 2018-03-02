@@ -1,14 +1,186 @@
-import * as Q from './query';
-import * as Provinces from './provinces';
-import * as Types from './types';
-import * as defs from './definitions';
+import { Search, NTSQuery, FSAQuery, latLon, SearchResponse } from './query';
+import { Province, search as ProvSearch } from './provinces';
+import { Type as TypeI, make as newType} from './types';
 
 const GEO_LOCATE_URL = 'https://geogratis.gc.ca/services/geolocation/${language}/locate';
-const GEO_NAMES_URL = 'https://geogratis.gc.ca/services/geoname/${language}/geonames.json';
-
-let lastQuery: string;
+const GEO_NAMES_URL = 'https://geogratis.gc.ca/services/geoname/${language}/geonames.json?category=O';
 
 const queryHistory = {};
+
+export interface userConfig {
+    includeTypes?: string | Array<string>,
+    excludeTypes?: string | Array<string>,
+    language?: string,
+    geoLocateUrl?: string,
+    geoNameUrl?: string,
+    sortByTypes?: Array<string>
+}
+
+export class SearchConfig {
+    language: string;
+    Type: TypeI;
+    urls: {
+        geoNameUrl: string,
+        geoLocateUrl: string
+    };
+    sortByTypes: Array<string>;
+
+    constructor(uConfig?: userConfig) {
+        uConfig = uConfig ? uConfig : {};
+        this.urls = {
+            geoLocateUrl: uConfig.geoLocateUrl ? uConfig.geoLocateUrl : GEO_LOCATE_URL,
+            geoNameUrl: uConfig.geoNameUrl ? uConfig.geoNameUrl : GEO_NAMES_URL
+        };
+        this.language = uConfig.language ? uConfig.language : 'en';
+        this.urls.geoLocateUrl = this.urls.geoLocateUrl.replace('${language}', this.language);
+        this.urls.geoNameUrl = this.urls.geoNameUrl.replace('${language}', this.language);
+        this.Type = newType(uConfig.includeTypes, uConfig.excludeTypes);
+        this.sortByTypes = uConfig.sortByTypes ? uConfig.sortByTypes : ['PROV', 'TERR', 'CITY', 'TOWN', 'VILG', 'UNP'];
+    }
+}
+
+export class GeoSearch extends SearchConfig {
+    query: string;
+    nameSearch: string | undefined;
+    results: Search | NTSQuery | FSAQuery | Province;
+
+    input(value: string) {
+        if (!value || value.length < 3 || /^\d{3}$/.test(value))
+            return;
+        
+        this.query = value;
+        let x = this.decompose(value);
+        
+        if (x === true)
+            return;
+
+        if (this.results instanceof Province) {
+            return this.results;
+        } else if (this.results) {
+            return this.results.query(x);
+        }
+    }
+
+    UI(config?: UIconfig): UI {
+        return new UI(this, config);
+    }
+
+    radialComposition(q: string): string | boolean {
+        if (/\s(?:near|près du)$/.test(q))
+            return true;
+
+        const radialSplit = q.split(this.language === 'en' ? ' near ' : ' près du ').map(v => v.trim());
+
+        if (radialSplit.length !== 2)
+            return false;
+
+        const radialV = radialSplit[1];
+
+        if (this.isProvince(radialV))
+            throw new Error('Cannot do radial search (near) with provinces.');
+
+        const isLocateType = this.isLocateQuery(radialV);
+        const latlon = radialV.split(',').map(v => parseFloat(v.trim()));
+        
+        if (isLocateType || latlon) {
+            this.results = new Search(this.urls);
+            this.results.setRestriction(isLocateType || latlon);
+
+            return radialSplit[0];
+        }
+
+        return true;
+    }
+
+    boundedComposition(q: string): string | boolean {
+        if (/\s(?:in|au)$/.test(q))
+            return true;
+
+        const boundedSplit = this.query.split(this.language === 'en' ? ' in ' : ' au ').map(v => v.trim());
+
+        if (boundedSplit.length !== 2)
+            return false;
+
+        const boundV = boundedSplit[1];
+        const isLoc = this.hasProvinceOrLocateRestriction(boundV);
+        const bboxSplit = boundV.split(',').map(v => parseFloat(v.trim()));
+
+        if (isLoc instanceof FSAQuery)
+            throw new Error('Cannot do bounded search (in) with FSA codes at this time.');
+        else if (isLoc || bboxSplit.length === 4) {
+            this.results = new Search(this.urls);
+            this.results.setRestriction(isLoc || bboxSplit);
+
+            return boundedSplit[0];
+        }
+        return true;
+    }
+
+    commaComposition(q: string): string | false {
+        const commaSplit = this.query.split(',').map(v => v.trim());
+
+        if (commaSplit.length !== 2)
+            return false;
+
+        const isProvince = this.isProvince(commaSplit[1]);
+        if (!isProvince)
+            return commaSplit[0];
+
+        this.results = isProvince;
+        return commaSplit[0];
+    }
+
+    decompose(q: string): string | true {
+        q = q.trim();
+        const uniqueSearches = this.commaComposition(q) || this.boundedComposition(q) || this.radialComposition(q);
+
+        if (!uniqueSearches) {
+            this.results = new Search(this.urls);
+            return q;
+        } 
+
+        return uniqueSearches;
+    }
+
+    hasProvinceOrLocateRestriction(q: string): Province | NTSQuery | FSAQuery | false {
+        const isProvince = this.isProvince(q);
+        const isLocateQuery = !isProvince ? this.isLocateQuery(q) : false;
+        return isProvince || isLocateQuery;
+    }
+
+    isProvince(q: string): Province | false {
+        return ProvSearch(q.trim());
+    }
+
+    isLocateQuery(q: string): NTSQuery | FSAQuery | false {
+        if (/^[ABCEGHJKLMNPRSTVXYabceghjklmnprstvxy]\d[A-Za-z]/.test(q)) {
+            const newQ = new FSAQuery(this.urls);
+            newQ.query.bind(newQ, q.toUpperCase());
+            return newQ;
+        } else if (/^\d{2,3}[A-Pa-p]/.test(q)) {
+            const newQ = new NTSQuery(this.urls);
+            newQ.query.bind(newQ, q.toUpperCase());
+            return newQ;
+        } else {
+            return false;
+        }
+    }
+
+    typesInName(q: string): string | false {
+        const regx = new RegExp(/.*(\((.+)\))/);
+        const regxResult = regx.exec(q);
+
+        if (regxResult) {
+            regxResult[2].split(',').map(type => {
+                let checkedType = this.Type.isValid(type);
+                if (checkedType)
+                    this.Type.validSet.push(checkedType);
+            });
+            return q.replace(regxResult[1], '');
+        }
+        return false;
+    }
+}
 
 class UI {
     private resultHandler: resultHandler;
@@ -18,8 +190,10 @@ class UI {
     private inputElem: HTMLInputElement;
     private docFrag: DocumentFragment;
     private inputValue: string;
+    private search: GeoSearch;
 
-    constructor(config?: UIconfig) {
+    constructor(search: GeoSearch, config?: UIconfig, ) {
+        this.search = search;
         this.docFrag = document.createDocumentFragment();
         this.makeConfig(config || {});
         this.domBindings();
@@ -44,11 +218,11 @@ class UI {
     hasQueryChanged(evt: KeyboardEvent | string) {
         const qValue = typeof evt === 'string' ? evt : (<HTMLInputElement>evt.target).value;
 
-        if (qValue && qValue.length > 2 && qValue !== this.inputValue) {
-            this.inputValue = qValue;
+        if (qValue === this.inputValue) {
             setTimeout(() => this.hasQueryChanged(qValue), 200);
             return false;
         } else {
+            this.inputValue = qValue;
             this.inputHasChanged(qValue);
             return true;
         }
@@ -57,34 +231,35 @@ class UI {
     
     inputHasChanged(query: string) {
         
-        const qValue = (<HTMLInputElement>evt.target).value;
-
-        if (qValue.length < 3 || evt.keyCode === 16 || evt.keyCode === 17)
-            return;
+        const qValue = query;
         
-        while (this.resultContainer.firstChild) {
-            this.resultContainer.removeChild(this.resultContainer.firstChild);
+        while (this.resultElem.firstChild) {
+            this.resultElem.removeChild(this.resultElem.firstChild);
         }
 
-        while (this.featureContainer.firstChild) {
-            this.featureContainer.removeChild(this.featureContainer.firstChild);
+        while (this.featureElem.firstChild) {
+            this.featureElem.removeChild(this.featureElem.firstChild);
         }
 
-        this.query(qValue).onComplete.then(q => {                
-            if (q.featureResults) {
-                this.featureContainer.appendChild(this.featureHandler(q.featureResults));
-            }
+        let searchResult = this.search.input(qValue);
 
-            this.resultContainer.appendChild(this.resultHandler(q.results));
-        }).catch(err => {
-            const p = document.createElement('p');
-            p.innerHTML = err;
-            this.resultContainer.appendChild(p);
-        });   
+        if (!searchResult)
+            return;
 
+
+        (<Promise<any>>searchResult).then(console.error);
+        if (searchResult instanceof NTSQuery) {
+            (<Promise<NTSQuery | null>>searchResult).then(v => console.error(v));
+        } else if (searchResult instanceof FSAQuery) {
+            (<Promise<FSAQuery | null>>searchResult).then(v => console.error('FSA Result:', v));
+        } else if (searchResult instanceof Search) {
+            (<Promise<Array<SearchResponse>>>searchResult).then(v => console.error(v));
+        } else if (searchResult instanceof Province) {
+            console.error('Province: Result', searchResult);
+        }
     }
 
-    optimizeSortByType(sortByTypes: Array<string>): defs.genericNumberObjectType {
+    optimizeSortByType(sortByTypes: Array<string>): genericNumberObjectType {
         const returnObj = {};
         sortByTypes.forEach((x, i) => {
             returnObj[x] = i;
@@ -93,7 +268,7 @@ class UI {
         return returnObj;
     }
 
-    defaultResultHandler(results: defs.nameResultList): HTMLElement {
+    defaultResultHandler(results): HTMLElement {
         const ul = document.createElement('ul');
         
         results.reverse().forEach(r => {
@@ -105,18 +280,18 @@ class UI {
         return ul;
     }
 
-    defaultFeatureHandler(fR: defs.queryFeatureResults): HTMLElement {
+    defaultFeatureHandler(fR) {
         let output;
 
-        if (defs.isFSAResult(fR)) {
-            output = `${fR.fsa} - FSA located in ${fR.province} @ lat: ${fR.latLon.lat}, lon: ${fR.latLon.lon}`;
-        } else {
-            output = `${fR.nts} - NTS located in ${fR.location} @ lat: ${fR.latLon.lat}, lon: ${fR.latLon.lon}`;
-        }
+        //if (isFSAResult(fR)) {
+          //  output = `${fR.fsa} - FSA located in ${fR.province} @ lat: ${fR.latLon.lat}, lon: ${fR.latLon.lon}`;
+        //} else {
+       //     output = `${fR.nts} - NTS located in ${fR.location} @ lat: ${fR.latLon.lat}, lon: ${fR.latLon.lon}`;
+       // }
 
-        const p = document.createElement('p');
-        p.innerHTML = output;
-        return p;
+       // const p = document.createElement('p');
+        //p.innerHTML = output;
+       // return p;
     }
 
    
@@ -126,116 +301,10 @@ class UI {
     }
 }
 
-export class SearchConfig {
-    language: string;
-    types: Types.TypeI;
-    provinces: Array<Provinces.ProvinceI>;
-    geoNameUrl: string;
-    geoLocateUrl: string;
-    sortByTypes: Array<string>
-
-    constructor(uConfig?: defs.userConfig) {
-        uConfig = uConfig ? uConfig : {};
-        this.language = uConfig.language ? uConfig.language : 'en';
-        
-        // set default URLS if none provided and search/replace language in string (if exists)
-        this.geoLocateUrl = uConfig.geoLocateUrl ? uConfig.geoLocateUrl : GEO_LOCATE_URL;
-        this.geoNameUrl = uConfig.geoNameUrl ? uConfig.geoNameUrl : GEO_NAMES_URL;
-        this.geoLocateUrl = this.geoLocateUrl.replace('${language}', this.language);
-        this.geoNameUrl = this.geoNameUrl.replace('${language}', this.language);
-        
-        this.types = Types.make();
-        this.types.filterValidTypes(uConfig.includeTypes, uConfig.excludeTypes);
-        
-        this.provinces = Provinces.list;
-        
-        this.sortByTypes = uConfig.sortByTypes ? uConfig.sortByTypes : ['PROV', 'TERR', 'CITY', 'TOWN', 'VILG', 'UNP'];
-    }
+if ((<any>window)) {
+    (<any>window).GeoSearch = GeoSearch;
 }
 
-class GeoSearch extends SearchConfig {
-    query: string;
-    nameSearch: string;
-    splitQuery: Array<string>;
-    radial?: defs.latLon;
-    bounded?: Array<number>;
-    FSAregex = /^[ABCEGHJKLMNPRSTVXY]\d[A-Z]/;
-    NTSregex = /^\d{2,3}[A-P]/;
-
-    constructor(uConfig?: defs.userConfig) {
-        super(uConfig);
-    }
-
-    decompose() {
-        const boundedSplit = this.query.split(this.language === 'en' ? ' in ' : ' au ');
-        const radialSplit = this.query.split(this.language === 'en' ? ' near ' : ' près du ');
-        const commaSplit = this.query.split(',');
-        
-        if (boundedSplit.length > 1 && radialSplit.length > 1) {
-            throw new Error('Cannot constrain by both radial and bounded locations (in and near).');
-        } else if (boundedSplit.length === 2) {
-            // send off for process
-        } else if (radialSplit.length === 2) {
-            // send off for process
-        } else if (commaSplit.length > 1) {
-            // if true they are all types
-            if (commaSplit.every(p => !!this.types.isValid(p))) {
-                commaSplit.forEach(t => this.types.validSet.add(t));
-
-            } else if (commaSplit.length === 2) {
-                // contraint 2 must be a province, NTS, or FSA (100km radial)
-            }
-        } else {
-            // plain jane name nts/fsa search
-        }
-    }
-
-    typesInName(q: string): string | false {
-        const regx = new RegExp(/.*(\((.+)\))/);
-        const regxResult = regx.exec(q);
-
-        if (regxResult) {
-            regxResult[2].split(',').map(type => {
-                let checkedType = this.types.isValid(type);
-                if (checkedType)
-                    this.types.validSet.add(checkedType);
-            });
-            return q.replace(regxResult[1], '');
-        }
-        return false;
-    }
-
-    processQuery(query: string): Q.Query {
-        const q = this.categorizeQuery(this.config, query);
-        queryHistory[q.query] = queryHistory[q.query] ? queryHistory[q.query] : q.run();
-        return queryHistory[query];
-    }
-
-    categorizeQuery(config: defs.mainConfig, query: string): {query: string, run: Function} {
-        let run: Function;
-        // FSA test
-        if (this.FSAregex.test(query)) {
-            query = query.substring(0,3).toUpperCase();
-            run = () => new Q.FSAQuery(config, query);
-        // Partial NTS match (Sheet and Map Unit Subdivision)
-        } else if (this.NTSregex.test(query)) {
-            query = query.substring(0,6).toUpperCase();
-            run = () => new Q.NTSQuery(config, query);
-        // name based search
-        } else {
-            run = () => {
-                const q = new Q.Query(config, query);
-                q.onComplete = q.search().then(results => {
-                    q.results = results;
-                    return q;
-                });
-                return q;
-            };            
-        }
-
-        return {query, run};
-    }
-}
 
 interface UIconfig {
     handleResults?:     resultHandler,
@@ -246,14 +315,17 @@ interface UIconfig {
 }
 
 interface resultHandler {
-    (results: defs.nameResultList): HTMLElement
+    (results: any): HTMLElement
 }
 
 interface featureHandler {
-    (results: defs.queryFeatureResults): HTMLElement
+    (results: any): HTMLElement
 }
 
+export interface genericObjectType {
+    [key: string]: string
+}
 
-if ((<any>window)) {
-    (<any>window).GeoSearch = GeoSearch;
+export interface genericNumberObjectType {
+    [key: string]: number
 }

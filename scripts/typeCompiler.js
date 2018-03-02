@@ -1,5 +1,7 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
+var pluralize = require('pluralize')
+
 const types = {
     "FSA": "FSA",
     "forward sortation area": "FSA",
@@ -12,19 +14,24 @@ const types = {
 function fetchConsise(lang) {
     return fetch(`https://geogratis.gc.ca/services/geoname/${lang}/codes/concise.json`).then(res => res.json())
         .then(json => json.definitions.forEach(type => {
-            if (!types[type.code])
-                types[type.code] = types[type.code];
-
+            addType(type.code, type.code);
+            
             const regx = new RegExp(/.*(\((.+)\))/);
             const regxResult = regx.exec(type.description);
-            if (regxResult) {
-                regxResult[2].split(',').map(altName => {
-                    altName = altName.trim();
-                    if (!types[altName])
-                        types[altName] = type.code;
-                });
-            }
+            if (regxResult)
+                regxResult[2].split(',').forEach(altName => addType(altName.trim(), type.code, lang === 'en'));
         }));
+}
+
+function addType(i, v, makePlural = false) {
+    i = i.toLowerCase();
+    v = v.toUpperCase();
+
+    if (!types[i])
+        types[i] = v;
+
+    if (makePlural)
+        addType(pluralize(i), v);
 }
 
 Promise.all([fetchConsise('en'), fetchConsise('fr')]).then(() => {

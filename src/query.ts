@@ -1,119 +1,16 @@
-import * as defs from './definitions';
 import { SearchConfig } from './index'
-import * as Provinces from './provinces';
+import { Province, list as ProvinceList } from './provinces';
 
-export class Q {
-    config: SearchConfig;
-    query: string | null;
-    featureResults: defs.queryFeatureResults;
-    suggestions: defs.NTSResultList = [];
-    _results: defs.nameResultList = [];
-    onComplete: Promise<this>;
-
-    constructor(config: SearchConfig, query?: string) {
-        this.query = query || null;
-        this.config = config;
-    }
-
-    set results(results: defs.nameResultList) {
-        
-        //results.sort((a, b) => {
-            //return this.config.sortByTypes[a.type.code] - this.config.sortByTypes[b.type.code] || 1;
-       // });
-        
-        this._results = results;
-    }
-
-    get results(): defs.nameResultList {
-        return this._results;
-    }
-
-    private getUrl(useLocate?: boolean, restrict?: Array<number>, altQuery?: string, lat?: number, lon?: number): string {
-        let url = '';
-        let query = altQuery ? altQuery : this.query;
-        if (useLocate) {
-            url = this.config.geoLocateUrl + '?q=' + query;
-        
-        } else if (lat && lon) {
-            url = `${this.config.geoNameUrl}?lat=${lat}&lon=${lon}`;
-        
-        } else {
-            url = `${this.config.geoNameUrl}?q=${query}`;
-        }
-
-        if (restrict) {
-            if (restrict.length === 4) {
-                url += `&bbox=${restrict.join(',')}`;
-            } else {
-                url += `&province=${restrict.join(',')}`;
-            }
-        }
-
-        return url;
-    }
-
-    normalizeNameItems(items: Array<defs.nameResponse>): defs.nameResultList {
-        return items.filter(i => this.config.types.filteredConciseToList[i.concise.code]).map(i => {
-            const province = this.config.provinces.find(p => p.code === i.province.code);
-            return {
-                name: i.name,
-                location: i.location,
-                province: {
-                    name: province && province[this.config.language] || 'Not Found',
-                    code: i.province.code
-                },
-                type: i.concise.code,
-                latLon: { lat: i.latitude, lon: i.longitude},
-                bbox: i.bbox
-            }
-        });
-    }
-
-    search(restrict?: Array<number>): Promise<defs.nameResultList> {
-       return (<Promise<defs.rawNameResult>>this.jsonRequest(this.getUrl(false, restrict))).then(r => this.normalizeNameItems(r.items));
-    }
-
-    nameByLatLon(lat: number, lon: number, restrict?: Array<number>): Promise<defs.nameResultList> {
-        return (<Promise<defs.rawNameResult>>this.jsonRequest(this.getUrl(false, restrict, undefined, lat, lon))).then(r => this.normalizeNameItems(r.items));
-    }
-
-    locateByQuery(altQuery?: string): Promise<defs.locateResponseList> {
-        return (<Promise<defs.locateResponseList>>this.jsonRequest(this.getUrl(true, undefined, altQuery)));
-    }
-
-    jsonRequest(url: string) {
-        return new Promise((resolve, reject) => {
-            const xobj = new XMLHttpRequest();
-            xobj.open('GET', url, true);
-            xobj.responseType = 'json';
-            xobj.onload = function() {
-                if (xobj.status === 200) {
-                    resolve(typeof xobj.response === 'string' ? JSON.parse(xobj.response) : xobj.response);
-                } else {
-                    reject('Could not load results from remote service.');
-                }
-            };
-            xobj.send();
-        });
-    }
-}
+type serviceUrlsI = {geoNameUrl: string, geoLocateUrl: string};
 
 class Query {
-    config: SearchConfig;
-    restrictByProvince: Array<number>;
-    restrictByBbox: Array<number>;
-    restrictByLatLon: latLon;
+    urls: serviceUrlsI;
 
-    constructor(config: SearchConfig) {
-        this.config = config;
+    constructor(urls: serviceUrlsI) {
+        this.urls = urls;
     }
 
-    search(q: string | undefined) {
-        let url = this.config.geoNameUrl + '?v=1';
-        url = q ? url + '&q=' + q : url;
-    }
-
-    jsonRequest(url: string): Promise<locateResponseList> {
+    jsonRequest(url: string): Promise<locateResponseList | rawGeoNameResp> {
         return new Promise((resolve, reject) => {
             const xobj = new XMLHttpRequest();
             xobj.open('GET', url, true);
@@ -130,16 +27,94 @@ class Query {
     }
 }
 
-export interface NTSResult {
-    nts: string, // 064D or 064D06
-    location: string, // "NUMABIN BAY"
-    code: string, // "NTS"
-    desc: string, // "National Topographic System"
-    latLon: latLon,
+export interface SearchResponse {
+    name: string,
+    location: string,
+    province: Province,
+    concise: string,
+    latlon: latLon,
     bbox: Array<number>
 }
 
-const fullNTSCache = {};
+interface geoNameResp {
+    name: string,
+    location: string,
+    province: {code: string},
+    concise: { code: string },
+    latitude: number,
+    longitude: number,
+    bbox: Array<number>,
+}
+
+interface rawGeoNameResp {
+    items: Array<geoNameResp>
+}
+
+type searchRestrictions = NTSQuery | FSAQuery | Province | latLon | Array<number>;
+
+export class Search extends Query {
+    concise: Array<string>;
+    url: string = this.urls.geoNameUrl;
+
+    setConcise(concise: Array<string>) {
+        this.url += `&concise=${concise.join(',')}`;
+    }
+
+    setRestriction(restrict: searchRestrictions) {
+        let rOnBbox: Bbox | undefined;
+        let rOnLatlon: latLon | undefined;
+        let rOnProvince: Province | undefined;
+
+        if (restrict instanceof NTSQuery) {
+            rOnBbox = restrict.bbox;
+        } else if(restrict instanceof FSAQuery) {
+            rOnLatlon = restrict.latlon;
+        } else if(isLatlong(restrict)) {
+            rOnLatlon = restrict;
+        } else if (restrict instanceof Province) {
+            rOnProvince = restrict;
+        } else if (isBbox(restrict)) {
+            rOnBbox = restrict;
+        }
+
+        if (rOnBbox) {
+            this.url += '&bbox=' + rOnBbox.join(',');
+        } else if(rOnLatlon) {
+            this.url += `&lat=${rOnLatlon.lat}&lon=${rOnLatlon.lon}`;
+        }
+
+        if (rOnProvince) {
+            this.url += `&province=${rOnProvince.code}`;
+        }
+    }
+
+    query(q: string): Promise<Array<SearchResponse>> {
+        return new Promise((resolve, reject) => {
+            this.jsonRequest(this.url + (q ? '&q=' + q : '')).then(j => {
+                if (isNameResult(j)) {
+                    const items = j.items;
+                    if (items.length === 0)
+                        reject('No results found.');
+
+                    resolve(items.map(i => {
+                        const province = ProvinceList.find(p => p.code === parseInt(i.province.code));
+                        if (!province)
+                            throw new Error('Province code returned is invalid.');
+                        
+                        return {
+                            name: i.name,
+                            location: i.location,
+                            province: province,
+                            concise: i.concise.code,
+                            latlon: {lat: i.latitude, lon: i.longitude},
+                            bbox: i.bbox
+                        }
+                    }));
+                }
+            });
+        });
+    }
+}
 
 /** 
  * National Topographic System (NTS)
@@ -158,6 +133,7 @@ const fullNTSCache = {};
  * 
  * Note that "Blocks" and "Units" are currently not supported on geogratis and are ignored on the query.
 */
+const baseNTSCache: {[key: string]: Promise<NTSQuery>} = {};
 export class NTSQuery extends Query {
     baseNTS: string;
     fullNTS: {[key: string]: NTSQuery} = {};
@@ -165,88 +141,108 @@ export class NTSQuery extends Query {
     latLon: latLon;
     bbox: Array<number>;
 
-    query(q: string): Promise<NTSQuery | null> {
-        let originalQuery = q;
+    populate(result: locateResponse): void {
+        const location = result.title.split(' ');
+        const fullNTSName = location.shift() || '';
+
+        const popI = fullNTSName === this.baseNTS ? this : new NTSQuery(this.urls);
+        popI.baseNTS = this.baseNTS;
+        popI.location = location.join(' ');
+        popI.latLon = { lat: result.geometry.coordinates[1], lon: result.geometry.coordinates[0]};
+        popI.bbox = result.bbox ? result.bbox : [];
+        
+        if (popI !== this)
+            this.fullNTS[fullNTSName] = popI;
+    }
+
+    query(q: string): Promise<NTSQuery> {
+        let originalQuery = q = q.toUpperCase();
+        let takeFirstThree = q.substring(0,3);
+        // if third character is a letter, we pad query with a leading 0 for caching uniformity
+        if (takeFirstThree.length === 3 && !parseInt(takeFirstThree[2]))
+            originalQuery = q = ('0' + q);
+
+        // we only perform a location search on the baseNTS, since the service also provides all fullNTS results.
+        q = q.substring(0, 4);
+
         return new Promise((resolve, reject) => {
-            let subNTS3 = q.substring(0,3).toUpperCase();
-            if (subNTS3.length === 3 && !parseInt(subNTS3[2]))
-                originalQuery = q = '0' + q;
+            // exists in the cache
+            if (baseNTSCache[q]) {
+                if (q !== originalQuery)
+                    baseNTSCache[q].then(nts => nts.fullNTS[originalQuery] ? resolve(nts.fullNTS[originalQuery]) : (originalQuery.length === 5 ? resolve(nts) : reject('NTS not valid.')));
+                else
+                    baseNTSCache[q].then(nts => nts ? resolve(nts) : reject('NTS not valid.'));
 
-            q = q.substring(0, 4);
-
-            if (fullNTSCache[q])
-                resolve(fullNTSCache[q]);
+                return;
+            }
 
             this.baseNTS = q;
 
-            this.jsonRequest(this.config.geoLocateUrl + '?q=' + this.baseNTS).then(j => {
-                if (isLocateResult(j)) {
-                    j.forEach(fullNTS => {
-                        const newNTS = new NTSQuery(this.config);
-                        const location = fullNTS.title.split(' ');
-                        const fullNTSName = location.shift() || '';
-                        newNTS.baseNTS = this.baseNTS;
-                        newNTS.location = location.join(' ');
-                        newNTS.latLon = { lat: fullNTS.geometry.coordinates[1], lon: fullNTS.geometry.coordinates[0]};
-                        
-                        if (fullNTS.bbox)
-                            newNTS.bbox = fullNTS.bbox;
-
-                        this.fullNTS[fullNTSName] = newNTS;
-                    });
-
-                    if (originalQuery === this.baseNTS) {
-                        resolve(this);
-                    } else {
-                        resolve(this.fullNTS[originalQuery]);
-                    }
+            baseNTSCache[this.baseNTS] = this.jsonRequest(this.urls.geoLocateUrl + '?q=' + this.baseNTS).then(resp => {
+                if (isLocateResult(resp)) {
+                    resp.forEach(r => this.populate(r));
+                    resolve(originalQuery === this.baseNTS ? this : this.fullNTS[originalQuery]);
                 }
                 reject('Not Found.');
-            });
-            
-        });
-    }
-}
-
-export class FSAQuery extends Query {
-    latlon: defs.latLon;
-    fsa: string;
-    provinces: Array<Provinces.ProvinceI>;
-
-    query(q: string): Promise<FSAQuery | null> {
-        this.fsa = q.substring(0,3).toUpperCase();
-        return this.jsonRequest(this.config.geoLocateUrl + '?q=' + q).then(j => {
-            if (isLocateResult(j) && j.length === 1) {
-                this.latlon = { lat: j[0].geometry.coordinates[1], lon:  j[0].geometry.coordinates[0] };
-                this.provinces = this.config.provinces.filter(p => p.containsFSA(this.fsa || ''));
                 return this;
-            }
-            return null;
+            });
         });
     }
 }
 
+const FSACache: {[key: string]: Promise<FSAQuery>} = {};
+export class FSAQuery extends Query {
+    latlon: latLon;
+    fsa: string;
+    provinces: Array<Province>;
 
+    query(q: string): Promise<FSAQuery> {
+        this.fsa = q.substring(0,3).toUpperCase();
+
+        return new Promise((resolve, reject) => {
+            if (FSACache[this.fsa]) {
+                FSACache[this.fsa].then(fsa => resolve(fsa)).catch(err => reject('FSA not found.'));
+                return;
+            }
+
+            FSACache[this.fsa] = this.jsonRequest(this.urls.geoLocateUrl + '?q=' + q).then(j => {
+                if (isLocateResult(j) && j.length === 1) {
+                    this.latlon = { lat: j[0].geometry.coordinates[1], lon:  j[0].geometry.coordinates[0] };
+                    this.provinces = ProvinceList.filter(p => p.containsFSA(this.fsa || ''));
+                    resolve(this);
+                }
+                reject('FSA not found.');
+                return this;
+            });
+        });
+    }
+}
 
 type locateResponseList = Array<locateResponse>;
 
-export interface locateResponse {
+interface locateResponse {
     title: string,
     bbox?: Array<number>,
     geometry: { coordinates: Array<number> }
 }
 
-export function isLocateResult(result: locateResponseList): result is locateResponseList {
-    return !!(<locateResponseList>result).length;
+function isLocateResult(result): result is locateResponseList {
+    return !result.items;
 }
 
-export interface FSAResult {
-    fsa: string, // "H0H"
-    code: string, // "FSA"
-    desc: string, // "Forward Sortation Area"
-    provinces: Array<Provinces.ProvinceI>,
-    latLon: latLon
+function isNameResult(result): result is rawGeoNameResp {
+    return result && result.items;
 }
+
+function isLatlong(result): result is latLon {
+    return typeof result === 'object' && result['lat'] && result['lon'];
+}
+
+function isBbox(result): result is Bbox {
+    return typeof result === 'object' && result.length === 4 && result.every(v => typeof v === 'number');
+}
+
+type Bbox = Array<number>;
 
 export interface latLon {
     lat: number,

@@ -1,9 +1,14 @@
 import { Search, NTSQuery, FSAQuery, latLon, SearchResponse } from './query';
 import { Province, search as ProvSearch } from './provinces';
 import { Type as TypeI, make as newType} from './types';
+import * as dmp from './diff_match_patch';
 
-const GEO_LOCATE_URL = 'https://geogratis.gc.ca/services/geolocation/${language}/locate';
-const GEO_NAMES_URL = 'https://geogratis.gc.ca/services/geoname/${language}/geonames.json?category=O';
+
+
+const dataCache = {
+    NTS: {},
+    FSA: {}
+};
 
 const queryHistory = {};
 
@@ -39,30 +44,40 @@ export class SearchConfig {
     }
 }
 
+type Result = Search | NTSQuery | FSAQuery | Province;
+
 export class GeoSearch extends SearchConfig {
     query: string;
+    prevQuery: string;
+    private _ui: UI;
     nameSearch: string | undefined;
     results: Search | NTSQuery | FSAQuery | Province;
+    conciseFilter: Set<string> = new Set();
 
-    input(value: string) {
-        if (!value || value.length < 3 || /^\d{3}$/.test(value))
-            return;
+    search(value: string): Promise<Result> {
+        return new Promise((resolve, reject) => {
+            if (!value || value.length < 3 || /^\d{3}$/.test(value))
+                reject(false);
         
-        this.query = value;
-        let x = this.decompose(value);
-        
-        if (x === true)
-            return;
+            this.prevQuery = this.query;
+            this.query = value.toLowerCase();
 
-        if (this.results instanceof Province) {
-            return this.results;
-        } else if (this.results) {
-            return this.results.query(x);
-        }
+            // Halt search if concise types are not fully entered or valid i.e. Toronto (City
+            // Concise types will be processed when the closing bracket is added
+            let hasType;
+            if (/.* \(.{3,}/.test(value))
+                (hasType = this.typesInName(this.query)) ? this.query = hasType : reject(true);
+
+
+            const breakDown = this.breakDown(value)
+        });
     }
 
-    UI(config?: UIconfig): UI {
-        return new UI(this, config);
+    UI(config?: any): UI {
+        if (!this._ui)
+            this._ui = new UI(this);
+        
+        return this._ui;
     }
 
     radialComposition(q: string): string | boolean {
@@ -119,7 +134,7 @@ export class GeoSearch extends SearchConfig {
     commaComposition(q: string): string | false {
         const commaSplit = this.query.split(',').map(v => v.trim());
 
-        if (commaSplit.length !== 2)
+        if (commaSplit.length === 2)
             return false;
 
         const isProvince = this.isProvince(commaSplit[1]);
@@ -130,7 +145,7 @@ export class GeoSearch extends SearchConfig {
         return commaSplit[0];
     }
 
-    decompose(q: string): string | true {
+    breakDown(q: string): string | true {
         q = q.trim();
         const uniqueSearches = this.commaComposition(q) || this.boundedComposition(q) || this.radialComposition(q);
 
@@ -142,6 +157,10 @@ export class GeoSearch extends SearchConfig {
         return uniqueSearches;
     }
 
+    isProvOrNTS(q: string): Province | NTSQuery | false {
+        return this.isProvince(q) || /^\d{2,3}[A-Pa-p]/.test(q);
+    }
+
     hasProvinceOrLocateRestriction(q: string): Province | NTSQuery | FSAQuery | false {
         const isProvince = this.isProvince(q);
         const isLocateQuery = !isProvince ? this.isLocateQuery(q) : false;
@@ -150,6 +169,15 @@ export class GeoSearch extends SearchConfig {
 
     isProvince(q: string): Province | false {
         return ProvSearch(q.trim());
+    }
+
+    isNTS(q: string): NTSQuery | false {
+        if (/^\d{2,3}[A-Pa-p]/.test(q)) {
+            const newQ = new NTSQuery(this.urls);
+            newQ.query.bind(null, q.toUpperCase());
+            dataCache.NTS
+            return newQ;
+        }
     }
 
     isLocateQuery(q: string): NTSQuery | FSAQuery | false {
@@ -166,40 +194,57 @@ export class GeoSearch extends SearchConfig {
         }
     }
 
+    /**
+     * Finds concise types of the form `Place name (City[, Town])`. If found it returns the provided query without the concise types, as in "Place name".
+     * Returns false if no valid types are found.
+     * 
+     * @param q full or particial string query
+     */
     typesInName(q: string): string | false {
-        const regx = new RegExp(/.*(\((.+)\))/);
+        const regx = new RegExp(/.*( \((.+)\))/);
         const regxResult = regx.exec(q);
+        let hasValidTypes = false;
 
         if (regxResult) {
-            regxResult[2].split(',').map(type => {
+            hasValidTypes = regxResult[2].split(',').map(type => {
                 let checkedType = this.Type.isValid(type);
-                if (checkedType)
-                    this.Type.validSet.push(checkedType);
-            });
+                return checkedType ? !!this.conciseFilter.add(checkedType) : false;
+            }).some(t => t);
             return q.replace(regxResult[1], '');
         }
-        return false;
+        return hasValidTypes;
+    }
+}
+
+
+class resultParser {
+    result(r: FSAQuery | NTSQuery | Province | Search) {
+        if(r instanceof Search)
+            r.this.SearchResult(r);
+    }
+
+    SearchResult(r: Search): HTMLElement {
+
     }
 }
 
 class UI {
-    private resultHandler: resultHandler;
+    private resultProcessor: any;
     private resultElem: HTMLElement;
-    private featureHandler: featureHandler;
     private featureElem: HTMLElement;
     private inputElem: HTMLInputElement;
     private docFrag: DocumentFragment;
     private inputValue: string;
     private search: GeoSearch;
 
-    constructor(search: GeoSearch, config?: UIconfig, ) {
+    constructor(search: GeoSearch) {
         this.search = search;
         this.docFrag = document.createDocumentFragment();
         this.makeConfig(config || {});
         this.domBindings();
     }
 
-    makeConfig(config: UIconfig): void {
+    makeConfig(config: any): void {
         this.resultHandler = config.handleResults ? config.handleResults.bind(this) : this.defaultResultHandler;
         this.featureHandler = config.handleFeatures ? config.handleFeatures.bind(this) : this.defaultFeatureHandler;
         this.inputElem = config.inputElem ? config.inputElem : document.createElement('input');
@@ -301,26 +346,11 @@ class UI {
     }
 }
 
+
 if ((<any>window)) {
     (<any>window).GeoSearch = GeoSearch;
 }
 
-
-interface UIconfig {
-    handleResults?:     resultHandler,
-    handleFeatures?:    featureHandler,
-    resultElem?:        HTMLElement,
-    featureElem?:       HTMLElement
-    inputElem?:         HTMLInputElement
-}
-
-interface resultHandler {
-    (results: any): HTMLElement
-}
-
-interface featureHandler {
-    (results: any): HTMLElement
-}
 
 export interface genericObjectType {
     [key: string]: string

@@ -7,7 +7,7 @@ export class Type {
     filteredConciseToList = {};
     flat = types;
     filteredFlat = types;
-    validSet: Array<string> = [];
+    validSet: Set<string> = new Set();
 
     constructor() {
         Object.keys(types).forEach(p => {

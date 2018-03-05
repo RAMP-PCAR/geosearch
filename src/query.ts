@@ -1,6 +1,11 @@
 import { SearchConfig } from './index'
 import { Province, list as ProvinceList } from './provinces';
 
+const URLS = {
+    GEO_LOCATE_URL: 'https://geogratis.gc.ca/services/geolocation/${language}/locate',
+    GEO_NAMES_URL: 'https://geogratis.gc.ca/services/geoname/${language}/geonames.json?category=O'
+};
+
 type serviceUrlsI = {geoNameUrl: string, geoLocateUrl: string};
 
 class Query {
@@ -140,6 +145,15 @@ export class NTSQuery extends Query {
     location: string;
     latLon: latLon;
     bbox: Array<number>;
+
+    static isNTS(q: string): NTSQuery | false {
+        if (/^\d{2,3}[A-Pa-p]/.test(q)) {
+            const newQ = new NTSQuery(this.urls);
+            newQ.query.bind(null, q.toUpperCase());
+            dataCache.NTS
+            return newQ;
+        }
+    }
 
     populate(result: locateResponse): void {
         const location = result.title.split(' ');

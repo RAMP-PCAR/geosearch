@@ -1,16 +1,26 @@
 language: node_js
 
 node_js:
-  - 8.9.4
+  - 8.11.1
+
+before_deploy:
+- rm ~/.ssh/id_rsa
+- openssl aes-256-cbc -K $encrypted_94ed5b4cf702_key -iv $encrypted_94ed5b4cf702_iv -in ./deploy/cloudkey.enc -out ~/.ssh/id_rsa -d
+- chmod 600 ~/.ssh/id_rsa
+- echo -e "Host *\n\tStrictHostKeyChecking no\n" >> ~/.ssh/config
+- eval `ssh-agent -s`
+- ssh-add ~/.ssh/id_rsa
+
+deploy:
+  provider: script
+  skip_cleanup: true
+  script: bash ./deploy/docs.sh
+  on:
+    tags: true
 
 cache:
   directories:
     - node_modules
-
-after_success:
-  - git config credential.helper "store --file=.git/credentials"
-  - echo "https://${GIT_OAuth}:@github.com" > .git/credentials
-  - bash ./travis.sh
 
 env:
   global:

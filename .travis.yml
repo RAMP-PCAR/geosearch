@@ -1,7 +1,18 @@
 language: node_js
 
 node_js:
-  - 8.9.4
+  - 8.11.1
+
+before_deploy:
+- openssl aes-256-cbc -K $encrypted_eeb7bb5388c8_key -iv $encrypted_eeb7bb5388c8_iv -in ./deploy/cloudkey.enc -out /tmp/docs_rsa -d
+- chmod 600 /tmp/docs_rsa
+
+deploy:
+  provider: script
+  skip_cleanup: true
+  script: bash ./deploy/docs.sh
+  on:
+    tags: true
 
 cache:
   directories:

@@ -79,7 +79,7 @@ You can pass an optional configuration object to `GeoSearch`. After instantiatin
 
 #### Auto Generated
 ````html
-<script src="dist/geosearch.js"></script>
+<script src="geosearch.js"></script>
 <div id="autoSearch"></div>
 
 <script>    
@@ -90,7 +90,7 @@ You can pass an optional configuration object to `GeoSearch`. After instantiatin
 
 #### Custom Elements
 ````html
-<script src="dist/geosearch.js"></script>
+<script src="geosearch.js"></script>
 
 <input id="searchField" name="searchField" type="text">
 <div id="feature"></div>

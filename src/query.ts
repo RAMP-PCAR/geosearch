@@ -7,7 +7,7 @@ export function make(config: defs.MainConfig, query: string): Query {
     const ntsReg = /^\d{2,3}[A-P]/;
     const scaleReg = /^[1][:]\d{1,3}[ ]*\d{1,3}[ ]*\d{1,3}[*]$/; // from 1:100 to 1:100 000 000
 
-    query = query.slice(0, -1);
+    let queryStr = query.slice(0, -1);
     if (fsaReg.test(query)) {
         // FSA test
         return new FSAQuery(config, query);
@@ -17,10 +17,10 @@ export function make(config: defs.MainConfig, query: string): Query {
         return new NTSQuery(config, query);
     } else if (latLngRegDD.test(query)) {
         // Lat/Long Decimal Degrees test
-        return new LatLongQuery(config, query, 'dd');
+        return new LatLongQuery(config, queryStr, 'dd');
     } else if (latLngRegDMS.test(query)) {
         // Lat/Long Degree Minute Second test
-        return new LatLongQuery(config, query, 'dms')
+        return new LatLongQuery(config, queryStr, 'dms')
     } else if (/^[A-Za-z]/.test(query)) {
         // name based search
         const q = new Query(config, query);
@@ -35,7 +35,7 @@ export function make(config: defs.MainConfig, query: string): Query {
         const typeCode = 'SCALE';
         q.onComplete = q.search().then(_ => {
 
-            q.scale = [{ name: query, type: { name: q.config.types.validTypes[typeCode], code: typeCode } }];
+            q.scale = [{ name: queryStr, type: { name: q.config.types.validTypes[typeCode], code: typeCode } }];
             return q;
         });
         return q;

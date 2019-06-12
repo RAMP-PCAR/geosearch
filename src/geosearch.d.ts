@@ -6,18 +6,26 @@ declare module GeoSearch
 	export interface MainConfig {
 	    geoNameUrl: string;
 	    geoLocateUrl: string;
+	    categories: string[];
+	    sortOrder: string[];
 	    maxResults: number;
+	    officialOnly: boolean;
 	    language: string;
 	    types: Types;
 	    provinces: Provinces;
 	}
 	export interface UserConfig {
-	    includeTypes?: string | string[];
 	    excludeTypes?: string | string[];
 	    language?: string;
-	    maxResults?: number;
+	    settings?: Settings;
 	    geoLocateUrl?: string;
 	    geoNameUrl?: string;
+	}
+	export interface Settings {
+	    categories: string[];
+	    sortOrder: string[];
+	    maxResults: number;
+	    officialOnly: boolean;
 	}
 	export interface LatLon {
 	    lat: number;
@@ -135,6 +143,7 @@ declare module GeoSearch
 	    nameByLatLon(lat: number, lon: number, restrict?: number[]): any;
 	    locateByQuery(altQuery?: string): Promise<defs.LocateResponseList>;
 	    jsonRequest(url: string): Promise<{}>;
+	    sortResults(response: any): any;
 	}
 	/**
 	 * National Topographic System (NTS)

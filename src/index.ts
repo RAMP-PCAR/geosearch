@@ -25,11 +25,19 @@ export class GeoSearch {
         geoLocateUrl = geoLocateUrl.replace('@{language}', language);
         geoNameUrl = geoNameUrl.replace('@{language}', language);
 
+        const categories = uConfig.settings ? uConfig.settings.categories : [];
+        const sortOrder = uConfig.settings ? uConfig.settings.sortOrder : [];
+        const maxResults = uConfig.settings ? uConfig.settings.maxResults : 100;
+        const officialOnly = uConfig.settings ? uConfig.settings.officialOnly : false;
+
         this.config = {
             language,
             types: Types(language),
             provinces: Provinces(language),
-            maxResults: uConfig.maxResults ? uConfig.maxResults : 100,
+            categories,
+            sortOrder,
+            maxResults,
+            officialOnly,
             geoNameUrl,
             geoLocateUrl
         };

@@ -7,7 +7,7 @@ export function make(config: defs.MainConfig, query: string): Query {
     const ntsReg = /^\d{2,3}[A-P]/;
     const scaleReg = /^[1][:]\d{1,3}[ ]*\d{1,3}[ ]*\d{1,3}[*]$/; // from 1:100 to 1:100 000 000
 
-    let queryStr = query.slice(0, -1);
+    const queryStr = query.slice(0, -1);
     if (fsaReg.test(query)) {
         // FSA test
         return new FSAQuery(config, query);
@@ -83,6 +83,14 @@ export class Query {
             }
         }
 
+        // add custom filtering params
+        if (this.config.categories.length > 0) {
+            url += `&concise=${this.config.categories.join(',')}`;
+        }
+        if (this.config.officialOnly) {
+            url += '&category=O';
+        }
+
         return url;
     }
 
@@ -120,13 +128,35 @@ export class Query {
             xobj.responseType = 'json';
             xobj.onload = () => {
                 if (xobj.status === 200) {
-                    resolve(typeof xobj.response === 'string' ? JSON.parse(xobj.response) : xobj.response);
+                    const rawResponse = typeof xobj.response === 'string' ? JSON.parse(xobj.response) : xobj.response;
+
+                    // sort the query results (if applicable) before returning
+                    const sortedResponse = this.sortResults(rawResponse);
+
+                    resolve(sortedResponse);
                 } else {
                     reject('Could not load results from remote service.');
                 }
             };
             xobj.send();
         });
+    }
+
+    sortResults(response: any): any {
+        if (this.config.sortOrder.length === 0 || !response.items || response.items.length === 0) {
+            return response
+        }
+
+        const diff = this.config.categories.filter(x => !this.config.sortOrder.includes(x));
+        const sortOrder = this.config.sortOrder.concat(diff);
+
+        // add a custom property to indicate the sort index location
+        // if `categories` were not provided, then there may be results in the list that do not appear in `sortOrder`; must sort them to the end of the results list
+        response.items.forEach((res: any) => res._customIdx = (sortOrder.indexOf(res.concise.code) >= 0 ? sortOrder.indexOf(res.concise.code) : sortOrder.length));
+
+        // sort now based on the custom property added above
+        response.items.sort((a: any, b: any) => (a._customIdx >= b._customIdx) ? 1 : -1)
+        return response;
     }
 }
 

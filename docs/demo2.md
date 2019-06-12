@@ -30,13 +30,13 @@ This repo contains a precompiled file located at `src/geosearch.js` which can be
 ````html
 <script src="geosearch.js"></script>
 
-<script>    
-    function getResults(query, config = {includeTypes: ['PROV', 'CITY', 'TOWN', 'TERR', 'LAKE']}) {
+<script>
+    function getResults(query, config = { settings: { categories: ['PROV', 'CITY', 'TOWN', 'TERR', 'LAKE'] } }) {
         // GeoSearch is a global window object since we included the library directly on our page.
         var geoSearch = new GeoSearch(config);
         geoSearch.query(query).onComplete.then(function(q) {
             if (q.results.length > 0) {
-                // json2html is used to display some of the returned data from our library for simplification. 
+                // json2html is used to display some of the returned data from our library for simplification.
                 document.getElementById("results").innerHTML = q.results.map(r => `${r.name} (${r.province})`).join('<br>');
             } else {
                 document.getElementById("results").innerHTML = 'No results were found.';
@@ -47,7 +47,9 @@ This repo contains a precompiled file located at `src/geosearch.js` which can be
     function getCityResults(q) {
         const config = {
             language: 'fr',
-            includeTypes: ['CITY']
+            settings: {
+                categories: ['CITY']
+            }
         };
 
         getResults(q, config);

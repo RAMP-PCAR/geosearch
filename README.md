@@ -2,7 +2,7 @@ Provides name, postal code, and NTS location based searching within Canada, usin
 
 It can be configured to return only certain types of results like provinces or cities, filter catagories, sort results, and can be used in English or French.
 
-## See our [documentation](https://geosearch-docs.fgpv-vpgf.com) for all the details
+## See our [documentation](https://ramp-pcar.github.io/geosearch/#/) for all the details
 
 ### Installation
 
